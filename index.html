@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>your's companion</title>
+  <title>Your's companion</title>
   <style>
     * {
       box-sizing: border-box;
@@ -162,7 +162,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>test module prortotype 23</h1>
+    <h1>✨ AI Chat</h1>
     <p class="subtitle">Runs entirely in your browser — no server, no signup</p>
 
     <div class="chat-area">
@@ -200,7 +200,6 @@
             }
           }
         });
-
         statusEl.textContent = '✓ Ready — ask away!';
         askBtn.disabled = false;
         promptEl.focus();
@@ -220,32 +219,35 @@
 
       try {
         const messages = [
-          { role: 'system', content: 'You are a helpful assistant.' },
           { role: 'user', content: userPrompt }
         ];
 
-        const tokenizer = generator.tokenizer;
-        const prompt = tokenizer.apply_chat_template(messages, {
+        // Format the chat messages with the proper model templates manually
+        const formattedPrompt = generator.tokenizer.apply_chat_template(messages, {
           tokenize: false,
           add_generation_prompt: true
         });
 
-        const streamer = new TextStreamer(tokenizer, {
+        // Initialize streamer targeting our output element
+        const streamer = new TextStreamer(generator.tokenizer, {
           skip_prompt: true,
           on_chunk: (text) => {
-            const cleanText = text.replace(/<\|im_end\|>|<\|im_start\|>\w*/g, '');
-            outputEl.textContent += cleanText;
-            outputEl.scrollTop = outputEl.scrollHeight;
+            // Filter out any trailing template tags if they appear
+            if (!text.includes('<|im_end|>')) {
+              outputEl.textContent += text;
+              outputEl.scrollTop = outputEl.scrollHeight;
+            }
           }
         });
 
-        await generator(prompt, {
-          max_new_tokens: 220,
+        // Generate using the compiled string prompt instead of the raw array
+        await generator(formattedPrompt, {
+          max_new_tokens: 512,
           do_sample: true,
-          temperature: 0.8,
-          top_p: 0.95,
-          repetition_penalty: 1.05,
-          streamer
+          temperature: 0.7,
+          top_p: 0.9,
+          repetition_penalty: 1.1,
+          streamer: streamer
         });
 
         statusEl.textContent = '✓ Done';
@@ -258,7 +260,7 @@
     }
 
     askBtn.addEventListener('click', askAI);
-
+    
     promptEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
