@@ -1,9 +1,10 @@
+```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Your Companion</title>
+  <title>Browser AI Chatbot</title>
   <style>
     * {
       box-sizing: border-box;
@@ -17,7 +18,7 @@
       flex-direction: column;
       align-items: center;
       padding: 32px 16px;
-      background: 
+      background:
         linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.88)),
         url('https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?w=1920&q=80');
       background-size: cover;
@@ -162,23 +163,24 @@
 </head>
 <body>
   <div class="container">
-    <h1>Your Companion</h1>
+    <h1>✨ AI Chat</h1>
     <p class="subtitle">Runs entirely in your browser — no server, no signup</p>
 
     <div class="chat-area">
       <textarea id="prompt" placeholder="Ask me anything... (Enter to send, Shift+Enter for new line)"></textarea>
-      
+
       <div class="controls">
         <button id="askBtn">Ask AI</button>
         <div id="status" class="status">Initializing...</div>
       </div>
-      
+
       <div id="output" class="output">Your answer will appear here.</div>
     </div>
   </div>
 
   <script type="module">
-    import { pipeline, TextStreamer } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
+    // Fix 1: use the actively maintained package (v3), not the deprecated @xenova one.
+    import { pipeline, TextStreamer } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.0';
 
     const promptEl = document.getElementById('prompt');
     const askBtn = document.getElementById('askBtn');
@@ -192,15 +194,27 @@
       askBtn.disabled = true;
 
       try {
-        generator = await pipeline('text-generation', 'Xenova/Qwen2.5-0.5B-Instruct', {
+        const useWebGPU = !!navigator.gpu;
+        statusEl.textContent = useWebGPU
+          ? 'Loading model (WebGPU detected — fast path)...'
+          : 'Loading model (no WebGPU — will use CPU, slower)...';
+
+        generator = await pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct', {
+          dtype: 'q4',
+          device: useWebGPU ? 'webgpu' : 'wasm',
           progress_callback: (progress) => {
-            if (progress.status === 'downloading') {
-              const pct = progress.progress ? Math.round(progress.progress) : 0;
-              statusEl.textContent = `Downloading: ${pct}%`;
+            // v3's progress event uses status 'progress' (not 'downloading'),
+            // and progress.progress is already a 0-100 number.
+            if (progress.status === 'initiate') {
+              statusEl.textContent = `Starting download: ${progress.file || ''}`;
+            } else if (progress.status === 'progress') {
+              const pct = Math.round(progress.progress ?? 0);
+              statusEl.textContent = `Downloading ${progress.file || 'model'}: ${pct}%`;
+            } else if (progress.status === 'done') {
+              statusEl.textContent = `Finished: ${progress.file || ''}`;
             }
           }
         });
-
         statusEl.textContent = '✓ Ready — ask away!';
         askBtn.disabled = false;
         promptEl.focus();
@@ -215,41 +229,45 @@
       if (!userPrompt || !generator) return;
 
       askBtn.disabled = true;
-      statusEl.innerHTML = '<span class="loading-dots">Thinking</span>';
+      const startTime = Date.now();
+      let timerInterval = setInterval(() => {
+        const secs = Math.round((Date.now() - startTime) / 1000);
+        statusEl.textContent = `Thinking… (${secs}s — this can take up to a minute on CPU)`;
+      }, 500);
       outputEl.textContent = '';
 
       try {
         const messages = [
-          { role: 'system', content: 'You are a helpful assistant.' },
           { role: 'user', content: userPrompt }
         ];
 
-        const tokenizer = generator.tokenizer;
-        const prompt = tokenizer.apply_chat_template(messages, {
-          tokenize: false,
-          add_generation_prompt: true
-        });
-
-        const streamer = new TextStreamer(tokenizer, {
+        // Fix 2: the option is `callback_function`, not `on_chunk`.
+        // With the wrong name, transformers.js silently ignores it,
+        // so generation runs but nothing ever gets written to the page.
+        const streamer = new TextStreamer(generator.tokenizer, {
           skip_prompt: true,
-          on_chunk: (text) => {
-            const cleanText = text.replace(/<\|im_end\|>|<\|im_start\|>\w*/g, '');
-            outputEl.textContent += cleanText;
+          skip_special_tokens: true,
+          callback_function: (text) => {
+            clearInterval(timerInterval);
+            statusEl.textContent = '✓ Streaming response…';
+            outputEl.textContent += text;
             outputEl.scrollTop = outputEl.scrollHeight;
           }
         });
 
-        await generator(prompt, {
-          max_new_tokens: 220,
+        await generator(messages, {
+          max_new_tokens: 150,
           do_sample: true,
-          temperature: 0.8,
-          top_p: 0.95,
-          repetition_penalty: 1.05,
-          streamer
+          temperature: 0.7,
+          top_p: 0.9,
+          repetition_penalty: 1.1,
+          streamer: streamer
         });
 
+        clearInterval(timerInterval);
         statusEl.textContent = '✓ Done';
       } catch (err) {
+        clearInterval(timerInterval);
         statusEl.textContent = '✗ Generation failed';
         outputEl.textContent = `Error: ${err.message}`;
       } finally {
@@ -270,3 +288,4 @@
   </script>
 </body>
 </html>
+```
